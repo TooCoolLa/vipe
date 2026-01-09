@@ -530,15 +530,22 @@ class DroidNet(nn.Module):
         """load trained model weights"""
         import gdown
 
-        # Download ckpt if needed.
-        ckpt_path = Path(torch.hub.get_dir()) / "droid_slam" / "droid.pth"
-        if not ckpt_path.exists():
-            ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-            gdown.download(
-                "https://drive.google.com/file/d/1PpqVt1H4maBa_GbPJp4NwxRsd9jk-elh/view",
-                output=str(ckpt_path),
-                fuzzy=True,
-            )
+        # Try to load from local ckpt directory first
+        local_ckpt_path = Path("./ckpt/slam/droid/droid.pth")
+        if local_ckpt_path.exists():
+            print(f"Loading DROID-SLAM model from local path: {local_ckpt_path}")
+            ckpt_path = local_ckpt_path
+        else:
+            # Download ckpt if needed.
+            ckpt_path = Path(torch.hub.get_dir()) / "droid_slam" / "droid.pth"
+            if not ckpt_path.exists():
+                print("Downloading DROID-SLAM model from Google Drive...")
+                ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+                gdown.download(
+                    "https://drive.google.com/file/d/1PpqVt1H4maBa_GbPJp4NwxRsd9jk-elh/view",
+                    output=str(ckpt_path),
+                    fuzzy=True,
+                )
 
         state_dict = OrderedDict(
             [(k.replace("module.", ""), v) for (k, v) in torch.load(ckpt_path, weights_only=True).items()]

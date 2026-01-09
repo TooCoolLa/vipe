@@ -14,7 +14,9 @@
 # limitations under the License.
 
 import numpy as np
+import os
 import torch
+from pathlib import Path
 
 try:
     from depth_anything_3.api import DepthAnything3
@@ -41,7 +43,16 @@ class DepthAnything3Model(DepthEstimationModel):
             )
 
         dav3_logger.level = 0  # Disable logging timing information
-        self.model = DepthAnything3.from_pretrained("depth-anything/DA3METRIC-LARGE")
+        
+        # Try to load from local ckpt directory first
+        local_model_path = Path("./ckpt/depth/dav3/DA3METRIC-LARGE")
+        if local_model_path.exists():
+            print(f"Loading DAV3 model from local path: {local_model_path}")
+            self.model = DepthAnything3.from_pretrained(str(local_model_path))
+        else:
+            print("Loading DAV3 model from Hugging Face Hub...")
+            self.model = DepthAnything3.from_pretrained("depth-anything/DA3METRIC-LARGE")
+        
         self.model = self.model.cuda().eval()
 
     @property

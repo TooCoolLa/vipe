@@ -52,7 +52,14 @@ class PriorDepthAnything(nn.Module):
             raise ValueError(f"{self.args.frozen_model_size} coming soon...")
         fmde_name = f"depth_anything_v2_{self.args.frozen_model_size}.pth"  # Download model checkpoints
         if fmde_dir is None:
-            fmde_path = hf_hub_download(repo_id=self.args.repo_name, filename=fmde_name)
+            # Try local ckpt directory first
+            local_fmde_path = os.path.join("./ckpt/depth/priorda", fmde_name)
+            if os.path.exists(local_fmde_path):
+                print(f"Loading Frozen MDE model from local path: {local_fmde_path}")
+                fmde_path = local_fmde_path
+            else:
+                print("Downloading Frozen MDE model from Hugging Face Hub...")
+                fmde_path = hf_hub_download(repo_id=self.args.repo_name, filename=fmde_name)
         else:
             fmde_path = os.path.join(fmde_dir, fmde_name)
 
@@ -65,7 +72,14 @@ class PriorDepthAnything(nn.Module):
                 raise ValueError(f"{self.args.conditioned_model_size} coming soon...")
             cmde_name = f"depth_anything_v2_{self.args.conditioned_model_size}.pth"  # Download model checkpoints
             if cmde_dir is None:
-                cmde_path = hf_hub_download(repo_id=self.args.repo_name, filename=cmde_name)
+                # Try local ckpt directory first
+                local_cmde_path = os.path.join("./ckpt/depth/priorda", cmde_name)
+                if os.path.exists(local_cmde_path):
+                    print(f"Loading Conditioned MDE model from local path: {local_cmde_path}")
+                    cmde_path = local_cmde_path
+                else:
+                    print("Downloading Conditioned MDE model from Hugging Face Hub...")
+                    cmde_path = hf_hub_download(repo_id=self.args.repo_name, filename=cmde_name)
             else:
                 cmde_path = os.path.join(cmde_dir, cmde_name)
 
@@ -82,7 +96,14 @@ class PriorDepthAnything(nn.Module):
     def load_checkpoints(self, model, ckpt_dir, device="cuda:0"):
         ckpt_name = f"prior_depth_anything_{self.args.conditioned_model_size}.pth"
         if ckpt_dir is None:
-            ckpt_path = hf_hub_download(repo_id=self.args.repo_name, filename=ckpt_name)
+            # Try local ckpt directory first
+            local_ckpt_path = os.path.join("./ckpt/depth/priorda", ckpt_name)
+            if os.path.exists(local_ckpt_path):
+                print(f"Loading Prior-DA checkpoint from local path: {local_ckpt_path}")
+                ckpt_path = local_ckpt_path
+            else:
+                print("Downloading Prior-DA checkpoint from Hugging Face Hub...")
+                ckpt_path = hf_hub_download(repo_id=self.args.repo_name, filename=ckpt_name)
         else:
             ckpt_path = os.path.join(ckpt_dir, ckpt_name)
 

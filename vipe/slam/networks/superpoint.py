@@ -114,9 +114,18 @@ class SuperPoint(nn.Module):
         self.load_pretrained()
 
     def load_pretrained(self):
-        state_dict = torch.hub.load_state_dict_from_url(
-            "https://github.com/rpautrat/SuperPoint/raw/refs/heads/master/weights/superpoint_v6_from_tf.pth"
-        )
+        from pathlib import Path
+        
+        # Try to load from local ckpt directory first
+        local_ckpt_path = Path("./ckpt/slam/superpoint/superpoint_v6_from_tf.pth")
+        if local_ckpt_path.exists():
+            print(f"Loading SuperPoint model from local path: {local_ckpt_path}")
+            state_dict = torch.load(local_ckpt_path, map_location="cpu")
+        else:
+            print("Downloading SuperPoint model from GitHub...")
+            state_dict = torch.hub.load_state_dict_from_url(
+                "https://github.com/rpautrat/SuperPoint/raw/refs/heads/master/weights/superpoint_v6_from_tf.pth"
+            )
         self.load_state_dict(state_dict)
         self.eval()
 

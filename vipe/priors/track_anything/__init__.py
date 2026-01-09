@@ -21,22 +21,36 @@ class TrackAnythingPipeline:
         sam_run_gap: int = 10,
     ) -> None:
         # Prepare checkpoints.
-        sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth"
-        if not sam_ckpt_path.exists():
-            sam_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.hub.download_url_to_file(
-                "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
-                dst=str(sam_ckpt_path),
-            )
+        # Try to load from local ckpt directory first
+        local_sam_ckpt = Path("./ckpt/track_anything/sam/sam_vit_b_01ec64.pth")
+        if local_sam_ckpt.exists():
+            print(f"Loading SAM model from local path: {local_sam_ckpt}")
+            sam_ckpt_path = local_sam_ckpt
+        else:
+            sam_ckpt_path = Path(torch.hub.get_dir()) / "sam" / "sam_vit_b_01ec64.pth"
+            if not sam_ckpt_path.exists():
+                print("Downloading SAM model from Facebook AI...")
+                sam_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+                torch.hub.download_url_to_file(
+                    "https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth",
+                    dst=str(sam_ckpt_path),
+                )
 
-        aot_ckpt_path = Path(torch.hub.get_dir()) / "aot" / "R50_DeAOTL_PRE_YTB_DAV.pth"
-        if not aot_ckpt_path.exists():
-            aot_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
-            gdown.download(
-                "https://drive.google.com/file/d/1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ/view",
-                output=str(aot_ckpt_path),
-                fuzzy=True,
-            )
+        # Try to load from local ckpt directory first
+        local_aot_ckpt = Path("./ckpt/track_anything/aot/R50_DeAOTL_PRE_YTB_DAV.pth")
+        if local_aot_ckpt.exists():
+            print(f"Loading AOT model from local path: {local_aot_ckpt}")
+            aot_ckpt_path = local_aot_ckpt
+        else:
+            aot_ckpt_path = Path(torch.hub.get_dir()) / "aot" / "R50_DeAOTL_PRE_YTB_DAV.pth"
+            if not aot_ckpt_path.exists():
+                print("Downloading AOT model from Google Drive...")
+                aot_ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+                gdown.download(
+                    "https://drive.google.com/file/d/1QoChMkTVxdYZ_eBlZhK2acq9KMQZccPJ/view",
+                    output=str(aot_ckpt_path),
+                    fuzzy=True,
+                )
 
         self.threshold_args = {
             "box_threshold": 0.35,

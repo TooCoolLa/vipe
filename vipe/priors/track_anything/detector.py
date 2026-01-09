@@ -17,15 +17,24 @@ from .groundingdino.util.utils import clean_state_dict
 
 class Detector:
     def __init__(self, device):
+        from pathlib import Path
+        
         args = config
         args.device = device
         self.deivce = device
         self.gd = build_grounding_dino(args)
 
-        checkpoint = torch.hub.load_state_dict_from_url(
-            "https://huggingface.co/ShilongLiu/GroundingDINO/resolve/main/groundingdino_swint_ogc.pth",
-            map_location="cpu",
-        )
+        # Try to load from local ckpt directory first
+        local_ckpt_path = Path("./ckpt/track_anything/grounding_dino/groundingdino_swint_ogc.pth")
+        if local_ckpt_path.exists():
+            print(f"Loading Grounding DINO model from local path: {local_ckpt_path}")
+            checkpoint = torch.load(local_ckpt_path, map_location="cpu")
+        else:
+            print("Downloading Grounding DINO model from Hugging Face...")
+            checkpoint = torch.hub.load_state_dict_from_url(
+                "https://huggingface.co/ShilongLiu/GroundingDINO/resolve/main/groundingdino_swint_ogc.pth",
+                map_location="cpu",
+            )
         self.gd.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
         self.gd.eval()
 
