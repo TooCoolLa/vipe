@@ -71,7 +71,7 @@ def distribute_frames(temp_dir, out_root, chunk_size, overlap):
         # 例如: 0_100, 90_190, 1050_1150
         # ---------------------------------------------------------
         seg_folder_name = f"{current_start}_{actual_end_index}"
-        seg_folder_path = os.path.join(out_root, seg_folder_name)
+        seg_folder_path = os.path.join(out_root, seg_folder_name,'images')
         
         if not os.path.exists(seg_folder_path):
             os.makedirs(seg_folder_path)

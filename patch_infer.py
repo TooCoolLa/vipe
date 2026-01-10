@@ -33,8 +33,9 @@ def run_batch_inference(root_directory):
     fail_count = 0
 
     for folder_name in subdirs:
-        input_path = os.path.join(root_directory, folder_name)
-        output_path = os.path.join(input_path, "result") 
+        rootpath = os.path.join(root_directory, folder_name)
+        input_path = os.path.join(rootpath, "images")
+        output_path = os.path.join(rootpath, "result") 
         
         print(f"\n[处理中] ----------------------------------------")
         print(f"输入: {folder_name}")
