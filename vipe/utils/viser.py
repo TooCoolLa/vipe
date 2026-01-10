@@ -122,7 +122,7 @@ class ClientClosures:
         self.preload_task: asyncio.Task | None = None  # Background preload task
         self.scene_root_handle: viser.FrameHandle | None = None  # Root frame for scene transformation
         self.is_playing: bool = False  # Playback state
-        self.camera_trajectory_handle: viser.SceneNodeHandle | None = None  # Camera trajectory visualization
+        self.trajectory_frustums: list[tuple[viser.FrameHandle, viser.CameraFrustumHandle]] = []  # Historical frustums for trajectory (frame, frustum pairs)
 
     async def stop(self):
         self.task.cancel()
@@ -233,6 +233,15 @@ class ClientClosures:
             @self.gui_show_trajectory.on_update
             async def _(_) -> None:
                 self._update_trajectory_visibility()
+            
+            self.gui_trajectory_frustum_scale = self.client.gui.add_slider(
+                "Trajectory Frustum Scale", min=0.01, max=0.3, step=0.01, initial_value=0.05
+            )
+            
+            @self.gui_trajectory_frustum_scale.on_update
+            async def _(_) -> None:
+                # Update all trajectory frustums with new scale
+                self._update_camera_trajectory(self.current_displayed_timestep)
 
             self.gui_fov = self.client.gui.add_slider("FoV", min=30.0, max=120.0, step=1.0, initial_value=60.0)
 
@@ -334,62 +343,93 @@ class ClientClosures:
                 frame_node.frustum_handle.color = rainbow_value
 
     def _update_camera_trajectory(self, current_frame: int):
-        """Update camera trajectory visualization up to current frame."""
+        """Update camera trajectory visualization up to current frame with frustums."""
+        # Clear old trajectory frustums
+        for frame_handle, frustum in self.trajectory_frustums:
+            frustum.remove()
+            frame_handle.remove()
+        self.trajectory_frustums.clear()
+        
         if not self.gui_show_trajectory.value or len(self.frame_metadata) == 0:
-            if self.camera_trajectory_handle is not None:
-                self.camera_trajectory_handle.remove()
-                self.camera_trajectory_handle = None
             return
         
-        # Collect camera positions from frame 0 to current_frame
-        positions = []
-        colors = []
-        for i in range(current_frame + 1):
-            if i < len(self.frame_metadata):
-                c2w = self.frame_metadata[i]['c2w']
-                positions.append(c2w[:3, 3])
-                # Color gradient from blue (start) to red (current)
+        if current_frame < 1:
+            return  # Need at least 2 frames for trajectory
+        
+        # Get trajectory frustum scale
+        trajectory_scale = self.gui_trajectory_frustum_scale.value
+        spatial_subsample = self.gui_s_sub.value
+        
+        # Create frustums for all frames from 0 to current_frame-1 (excluding current)
+        current_artifact = self.global_context().artifacts[self.gui_id.value]
+        
+        # We need to load RGB data for trajectory frames
+        # To avoid performance issues, we'll load them in batches or use cached data
+        for i in range(current_frame):
+            if i >= len(self.frame_metadata):
+                break
+            
+            metadata = self.frame_metadata[i]
+            c2w = metadata['c2w']
+            intr = metadata['intrinsics']
+            camera_type = metadata['camera_type']
+            
+            # Get image if available in cache, otherwise skip or use placeholder
+            if i in self.frame_data_cache:
+                sampled_rgb, _, _ = self.frame_data_cache[i]
+                # Create thumbnail
+                frame_thumbnail = Image.fromarray(sampled_rgb)
+                frame_thumbnail.thumbnail((100, 100), Image.Resampling.LANCZOS)
+                thumbnail_array = np.array(frame_thumbnail)
+            else:
+                # Skip if not in cache to avoid loading delays
+                # Or use a small placeholder
+                thumbnail_array = None
+            
+            # Calculate frustum parameters
+            pinhole_intr = camera_type.build_camera_model(intr).pinhole().intrinsics
+            frame_height = int(pinhole_intr[3].item() * 2)
+            frame_width = int(pinhole_intr[2].item() * 2)
+            fov = 2 * np.arctan2(frame_height / 2, pinhole_intr[0].item())
+            
+            # Create frame handle first (like current frame does)
+            frame_handle = self.client.scene.add_frame(
+                f"/scene_root/trajectory/frame_{i}",
+                axes_length=0.0,  # No axes for trajectory frames
+                axes_radius=0.0,
+                wxyz=tf.SO3.from_matrix(c2w[:3, :3]).wxyz,
+                position=c2w[:3, 3],
+            )
+            
+            # Create frustum as child of the frame (like current frame does)
+            frustum = self.client.scene.add_camera_frustum(
+                f"/scene_root/trajectory/frame_{i}/frustum",
+                fov=fov,
+                aspect=frame_width / frame_height,
+                scale=trajectory_scale,
+                image=thumbnail_array if thumbnail_array is not None else None,
+            )
+            
+            # Set color based on position in trajectory (blue to red gradient)
+            if thumbnail_array is None:
                 t = i / max(current_frame, 1)
-                colors.append((int(255 * t), 0, int(255 * (1 - t))))
+                frustum.color = (int(255 * t), 0, int(255 * (1 - t)))
+            
+            self.trajectory_frustums.append((frame_handle, frustum))
         
-        if len(positions) < 2:
-            return
-        
-        # Remove old trajectory
-        if self.camera_trajectory_handle is not None:
-            self.camera_trajectory_handle.remove()
-        
-        # Draw trajectory as line strip
-        positions_array = np.array(positions)
-        
-        # Create line segments
-        line_segments = []
-        line_colors = []
-        for i in range(len(positions) - 1):
-            line_segments.append((positions_array[i], positions_array[i + 1]))
-            line_colors.append(colors[i])
-        
-        # Add path as multiple line segments
-        # viser doesn't have a direct line strip, so we use coordinate frames at each position
-        # or we can use spline
-        # For now, let's use a point cloud to show the trajectory
-        self.camera_trajectory_handle = self.client.scene.add_point_cloud(
-            name="/scene_root/camera_trajectory",
-            points=positions_array,
-            colors=np.array(colors),
-            point_size=0.02,
-            point_shape="circle",
-        )
+        logger.debug(f"Updated trajectory with {len(self.trajectory_frustums)} frustums")
     
     def _update_trajectory_visibility(self):
         """Toggle trajectory visibility."""
-        if self.camera_trajectory_handle is not None:
-            if self.gui_show_trajectory.value:
-                # Rebuild trajectory for current frame
-                self._update_camera_trajectory(self.current_displayed_timestep)
-            else:
-                self.camera_trajectory_handle.remove()
-                self.camera_trajectory_handle = None
+        if self.gui_show_trajectory.value:
+            # Rebuild trajectory for current frame
+            self._update_camera_trajectory(self.current_displayed_timestep)
+        else:
+            # Clear all trajectory frustums
+            for frame_handle, frustum in self.trajectory_frustums:
+                frustum.remove()
+                frame_handle.remove()
+            self.trajectory_frustums.clear()
 
     def _update_scene_transform(self):
         """Update the root scene transformation based on GUI controls."""

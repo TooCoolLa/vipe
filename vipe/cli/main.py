@@ -24,6 +24,7 @@ from vipe.streams.raw_mp4_stream import RawMp4Stream
 from vipe.streams.frame_dir_stream import FrameDirStream
 from vipe.utils.logging import configure_logging
 from vipe.utils.viser import run_viser
+from vipe.cli.merge import align_submaps
 
 
 @click.command()
@@ -99,6 +100,30 @@ def visualize(data_path: Path, port: int):
     run_viser(data_path, port)
 
 
+@click.command()
+@click.argument("root_dir", type=click.Path(exists=True, path_type=Path))
+@click.option("--overlap", "-n", default=10, type=int, help="Number of overlapping frames between submaps (default: 10)")
+@click.option("--with-scale/--no-scale", default=False, help="Enable scale estimation in Umeyama alignment (default: False)")
+@click.option("--output", "-o", type=click.Path(path_type=Path), help="Output JSON file (default: <root_dir>/camera_poses.json)")
+def merge(root_dir: Path, overlap: int, with_scale: bool, output: Path):
+    """Align multiple submaps into a unified global coordinate frame using Umeyama algorithm."""
+    logger = configure_logging()
+    
+    if output is None:
+        output = root_dir / "camera_poses.json"
+    
+    logger.info(f"Merging submaps from {root_dir}")
+    logger.info(f"Overlap frames: {overlap}, Scale estimation: {with_scale}")
+    logger.info(f"Output: {output}")
+    
+    try:
+        align_submaps(root_dir, overlap_frames=overlap, with_scale=with_scale, output_file=output)
+        logger.info("✓ Merge completed successfully")
+    except Exception as e:
+        logger.error(f"✗ Merge failed: {e}")
+        raise click.Abort()
+
+
 @click.group()
 @click.version_option()
 def main():
@@ -109,6 +134,7 @@ def main():
 # Add subcommands
 main.add_command(infer)
 main.add_command(visualize)
+main.add_command(merge)
 
 
 if __name__ == "__main__":
