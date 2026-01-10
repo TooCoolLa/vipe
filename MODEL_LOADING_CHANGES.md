@@ -29,12 +29,14 @@ else:
 - 微调模型: 优先查找 `./ckpt/depth/priorda/prior_depth_anything_vitb.pth`
 - 如果不存在，则从 Hugging Face Hub 下载
 
-### 3. DROID-SLAM
-**文件**: `vipe/slam/networks/droid_net.py`
+### 3. DROID-SLAM / Pi3X
+**文件**: `vipe/slam/networks/droid_net.py` 和 `vipe/slam/networks/pi3x_net.py`
 
 **修改**:
-- 优先查找 `./ckpt/slam/droid/droid.pth`
-- 如果不存在，则从 Google Drive 下载
+- droid模块已被替换为pi3x模块（来自 https://github.com/yyfz/Pi3）
+- 接口保持不变，输入输出兼容
+- 优先查找 `./ckpt/slam/pi3x/pi3x.pth` 或 `./ckpt/slam/droid/droid.pth`
+- 如果不存在，则从 Google Drive 下载原始 DROID 权重
 
 ### 4. SuperPoint
 **文件**: `vipe/slam/networks/superpoint.py`
@@ -95,6 +97,8 @@ python run.py streams=your_stream pipeline=dav3
 ├── slam/
 │   ├── droid/
 │   │   └── droid.pth
+│   ├── pi3x/
+│   │   └── pi3x.pth
 │   └── superpoint/
 │       └── superpoint_v6_from_tf.pth
 └── track_anything/
