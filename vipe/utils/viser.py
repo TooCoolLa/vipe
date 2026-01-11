@@ -123,6 +123,8 @@ class ClientClosures:
         self.scene_root_handle: viser.FrameHandle | None = None  # Root frame for scene transformation
         self.is_playing: bool = False  # Playback state
         self.trajectory_frustums: list[tuple[viser.FrameHandle, viser.CameraFrustumHandle]] = []  # Historical frustums for trajectory (frame, frustum pairs)
+        self.trajectory_update_task: asyncio.Task | None = None  # Debounced trajectory update task
+        self.last_trajectory_frame: int = -1  # Last frame for which trajectory was updated
 
     async def stop(self):
         self.task.cancel()
@@ -240,8 +242,10 @@ class ClientClosures:
             
             @self.gui_trajectory_frustum_scale.on_update
             async def _(_) -> None:
-                # Update all trajectory frustums with new scale
-                self._update_camera_trajectory(self.current_displayed_timestep)
+                # Update all trajectory frustums with new scale using debouncing
+                self.last_trajectory_frame = -1  # Force rebuild
+                if self.gui_show_trajectory.value:
+                    await self._debounced_update_trajectory(self.current_displayed_timestep)
 
             self.gui_fov = self.client.gui.add_slider("FoV", min=30.0, max=120.0, step=1.0, initial_value=60.0)
 
@@ -344,28 +348,40 @@ class ClientClosures:
 
     def _update_camera_trajectory(self, current_frame: int):
         """Update camera trajectory visualization up to current frame with frustums."""
-        # Clear old trajectory frustums
-        for frame_handle, frustum in self.trajectory_frustums:
-            frustum.remove()
-            frame_handle.remove()
-        self.trajectory_frustums.clear()
-        
+        # Skip if trajectory is disabled or not changed
         if not self.gui_show_trajectory.value or len(self.frame_metadata) == 0:
             return
         
         if current_frame < 1:
             return  # Need at least 2 frames for trajectory
         
+        # Skip if we already updated for this frame
+        if current_frame == self.last_trajectory_frame:
+            return
+        
+        self.last_trajectory_frame = current_frame
+        
+        # Clear old trajectory frustums
+        for frame_handle, frustum in self.trajectory_frustums:
+            frustum.remove()
+            frame_handle.remove()
+        self.trajectory_frustums.clear()
+        
         # Get trajectory frustum scale
         trajectory_scale = self.gui_trajectory_frustum_scale.value
         spatial_subsample = self.gui_s_sub.value
         
-        # Create frustums for all frames from 0 to current_frame-1 (excluding current)
+        # Smart sampling: don't create frustum for EVERY frame if we have many
+        # Show at most 50 trajectory frustums to keep it responsive
+        max_trajectory_frustums = 50
+        step = max(1, current_frame // max_trajectory_frustums)
+        
+        # Create frustums for sampled frames from 0 to current_frame-1 (excluding current)
         current_artifact = self.global_context().artifacts[self.gui_id.value]
         
         # We need to load RGB data for trajectory frames
         # To avoid performance issues, we'll load them in batches or use cached data
-        for i in range(current_frame):
+        for i in range(0, current_frame, step):
             if i >= len(self.frame_metadata):
                 break
             
@@ -417,11 +433,13 @@ class ClientClosures:
             
             self.trajectory_frustums.append((frame_handle, frustum))
         
-        logger.debug(f"Updated trajectory with {len(self.trajectory_frustums)} frustums")
+        logger.debug(f"Updated trajectory with {len(self.trajectory_frustums)} frustums (step={step})")
     
     def _update_trajectory_visibility(self):
         """Toggle trajectory visibility."""
         if self.gui_show_trajectory.value:
+            # Reset last frame to force rebuild
+            self.last_trajectory_frame = -1
             # Rebuild trajectory for current frame
             self._update_camera_trajectory(self.current_displayed_timestep)
         else:
@@ -430,6 +448,7 @@ class ClientClosures:
                 frustum.remove()
                 frame_handle.remove()
             self.trajectory_frustums.clear()
+            self.last_trajectory_frame = -1
 
     def _update_scene_transform(self):
         """Update the root scene transformation based on GUI controls."""
@@ -823,6 +842,69 @@ class ClientClosures:
             )
         
         frame.is_loaded = True
+    
+    async def _debounced_update_trajectory(self, current_frame: int):
+        """Debounced trajectory update to avoid excessive redraws during dragging."""
+        # Cancel previous task if still running
+        if self.trajectory_update_task is not None and not self.trajectory_update_task.done():
+            self.trajectory_update_task.cancel()
+            try:
+                await self.trajectory_update_task
+            except asyncio.CancelledError:
+                pass
+        
+        async def _do_update():
+            # Wait a bit to see if more updates come
+            await asyncio.sleep(0.15)  # 150ms debounce
+            self._update_camera_trajectory(current_frame)
+        
+        self.trajectory_update_task = asyncio.create_task(_do_update())
+    
+    async def _async_ensure_frame_loaded(self, display_idx: int):
+        """Async version of _ensure_frame_loaded to avoid blocking UI."""
+        frame = self.scene_frame_handles[display_idx]
+        
+        if frame.is_loaded:
+            return
+        
+        # Check if frame is in cache
+        if display_idx not in self.frame_data_cache:
+            # Not in buffer, load it asynchronously
+            logger.info(f"Frame {display_idx} not in ring buffer, loading asynchronously")
+            await self._async_add_frame_to_ring_buffer(display_idx)
+            
+            if display_idx not in self.frame_data_cache:
+                logger.error(f"Failed to load frame {display_idx}!")
+                return
+        
+        # Now load it (this part is quick - just UI updates)
+        self._ensure_frame_loaded(display_idx)
+    
+    async def _async_add_frame_to_ring_buffer(self, frame_idx: int):
+        """Async version of _add_frame_to_ring_buffer."""
+        # Skip if already in buffer
+        if frame_idx in self.ring_buffer_frames:
+            return
+        
+        # Skip if out of range
+        if frame_idx < 0 or frame_idx >= len(self.frame_metadata):
+            return
+        
+        # If buffer is full, evict oldest frame
+        if len(self.ring_buffer_frames) >= self.ring_buffer_size:
+            oldest_frame = self.ring_buffer_frames.pop(0)
+            if oldest_frame in self.frame_data_cache:
+                del self.frame_data_cache[oldest_frame]
+            if oldest_frame < len(self.scene_frame_handles):
+                self.scene_frame_handles[oldest_frame].unload()
+        
+        # Load the new frame asynchronously
+        await asyncio.get_event_loop().run_in_executor(None, self._load_frame_data_batch, [frame_idx])
+        
+        # Add to buffer if successfully loaded
+        if frame_idx in self.frame_data_cache:
+            self.ring_buffer_frames.append(frame_idx)
+            logger.debug(f"Added frame {frame_idx} to ring buffer")
         
         # No need to call _unload_distant_frames, ring buffer handles it
     
@@ -889,21 +971,24 @@ class ClientClosures:
                 current_timestep = self.gui_timestep.value
                 prev_timestep = self.current_displayed_timestep
                 
-                # Ensure the new frame is loaded
-                self._ensure_frame_loaded(current_timestep)
-                
+                # First, toggle visibility immediately for responsive UI
                 with self.client.atomic():
                     self.scene_frame_handles[current_timestep].visible = True
                     self.scene_frame_handles[prev_timestep].visible = False
                 self.current_displayed_timestep = current_timestep
                 
-                # Update camera trajectory
-                self._update_camera_trajectory(current_timestep)
+                # Then load frame data asynchronously (non-blocking)
+                # Use create_task to avoid awaiting - let it run in background
+                asyncio.create_task(self._async_ensure_frame_loaded(current_timestep))
                 
-                # Preload next frame into ring buffer (FIFO strategy)
+                # Update camera trajectory with debouncing to avoid excessive redraws
+                if self.gui_show_trajectory.value:
+                    await self._debounced_update_trajectory(current_timestep)
+                
+                # Preload next frame into ring buffer (async, don't await)
                 next_frame = current_timestep + 1
                 if next_frame < len(self.scene_frame_handles):
-                    self._add_frame_to_ring_buffer(next_frame)
+                    asyncio.create_task(self._async_add_frame_to_ring_buffer(next_frame))
 
     def cleanup(self):
         logger.info(f"Client {self.client.client_id} disconnected")

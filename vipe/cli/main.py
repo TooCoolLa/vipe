@@ -104,8 +104,11 @@ def visualize(data_path: Path, port: int):
 @click.argument("root_dir", type=click.Path(exists=True, path_type=Path))
 @click.option("--overlap", "-n", default=10, type=int, help="Number of overlapping frames between submaps (default: 10)")
 @click.option("--with-scale/--no-scale", default=False, help="Enable scale estimation in Umeyama alignment (default: False)")
+@click.option("--use-ransac/--no-ransac", default=False, help="Use RANSAC for robust outlier rejection (default: False)")
+@click.option("--ransac-threshold", default=1.0, type=float, help="RANSAC inlier threshold in meters (default: 1.0)")
+@click.option("--ransac-iterations", default=1000, type=int, help="Number of RANSAC iterations (default: 1000)")
 @click.option("--output", "-o", type=click.Path(path_type=Path), help="Output JSON file (default: <root_dir>/camera_poses.json)")
-def merge(root_dir: Path, overlap: int, with_scale: bool, output: Path):
+def merge(root_dir: Path, overlap: int, with_scale: bool, use_ransac: bool, ransac_threshold: float, ransac_iterations: int, output: Path):
     """Align multiple submaps into a unified global coordinate frame using Umeyama algorithm."""
     logger = configure_logging()
     
@@ -114,10 +117,21 @@ def merge(root_dir: Path, overlap: int, with_scale: bool, output: Path):
     
     logger.info(f"Merging submaps from {root_dir}")
     logger.info(f"Overlap frames: {overlap}, Scale estimation: {with_scale}")
+    logger.info(f"Use RANSAC: {use_ransac}")
+    if use_ransac:
+        logger.info(f"  RANSAC threshold: {ransac_threshold}m, iterations: {ransac_iterations}")
     logger.info(f"Output: {output}")
     
     try:
-        align_submaps(root_dir, overlap_frames=overlap, with_scale=with_scale, output_file=output)
+        align_submaps(
+            root_dir, 
+            overlap_frames=overlap, 
+            with_scale=with_scale,
+            use_ransac=use_ransac,
+            ransac_threshold=ransac_threshold,
+            ransac_iterations=ransac_iterations,
+            output_file=output
+        )
         logger.info("✓ Merge completed successfully")
     except Exception as e:
         logger.error(f"✗ Merge failed: {e}")
